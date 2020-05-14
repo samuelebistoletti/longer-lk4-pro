@@ -206,6 +206,7 @@
  * M501 - Restore parameters from EEPROM. (Requires EEPROM_SETTINGS)
  * M502 - Revert to the default "factory settings". ** Does not write them to EEPROM! **
  * M503 - Print the current settings (in memory): "M503 S<verbose>". S0 specifies compact output.
+ * M524 - Abort SD card print job started with M24 (Requires SDSUPPORT)
  * M540 - Enable/disable SD card abort on endstop hit: "M540 S<state>". (Requires ABORT_ON_ENDSTOP_HIT_FEATURE_ENABLED)
  * M600 - Pause for filament change: "M600 X<pos> Y<pos> Z<raise> E<first_retract> L<later_retract>". (Requires ADVANCED_PAUSE_FEATURE)
  * M603 - Configure filament change: "M603 T<tool> U<unload_length> L<load_length>". (Requires ADVANCED_PAUSE_FEATURE)
@@ -271,7 +272,6 @@
 #include "duration_t.h"
 #include "types.h"
 #include "parser.h"
-#include "LGT_SCR.h"
 
 #if ENABLED(AUTO_POWER_CONTROL)
   #include "power.h"
@@ -601,13 +601,7 @@ uint8_t target_extruder;
 #endif
 
 #if HAS_POWER_SWITCH
-  bool powersupply_on = (
-    #if ENABLED(PS_DEFAULT_OFF)
-      false
-    #else
-      true
-    #endif
-  );
+  bool powersupply_on;
   #if ENABLED(AUTO_POWER_CONTROL)
     #define PSU_ON()  powerManager.power_on()
     #define PSU_OFF() powerManager.power_off()
@@ -752,80 +746,6 @@ XYZ_CONSTS_FROM_CONFIG(float, max_length,     MAX_LENGTH);
 XYZ_CONSTS_FROM_CONFIG(float, home_bump_mm,   HOME_BUMP_MM);
 XYZ_CONSTS_FROM_CONFIG(signed char, home_dir, HOME_DIR);
 
-/*********************************************************************************
-********************************************************************************/
-////////////LGT_MAC////////////////////LGT_MAC///////////////////////////////LGT_MAC///////////////////////////
-#ifdef LGT_MAC
-	bool check_recovery = false;
-	char leveling_sta = 0;
-	int ii_setup = 0;
-	extern float resume_e_position,resume_x_position,resume_y_position;
-    extern LGT_SCR LGT_LCD;
-	extern E_MENU_TYPE menu_type;
-	extern PRINTER_STATUS status_type;
-	extern PRINTER_KILL_STATUS kill_type;
-	extern bool LGT_is_printing,LGT_stop_printing,leveling_wait,return_home;
-	extern char menu_move_dis_chk,menu_fila_type_chk;
-	extern void LGT_Line_To_Current(AxisEnum axis);
-	void DWIN_MAIN_FUNCTIONS();
-	void LGT_Pause_Move()
-	{
-		resume_x_position = current_position[X_AXIS];
-		resume_y_position = current_position[Y_AXIS];
-		resume_e_position = current_position[E_AXIS];
-		current_position[E_AXIS] = current_position[E_AXIS] - 3;
-		LGT_Line_To_Current(E_AXIS);
-		do_blocking_move_to_xy(FILAMENT_RUNOUT_MOVE_X, FILAMENT_RUNOUT_MOVE_Y, FILAMENT_RUNOUT_MOVE_F);
-		planner.synchronize();
-	}
-	void LGT_Init()
-	{
-		#if ENABLED(serial_port1)
-				MYSERIAL1.begin(BAUDRATE);
-		#endif
-		delay(600); 
-		status_type = PRINTER_SETUP;
-		#if ENABLED(POWER_LOSS_RECOVERY)
-			check_print_job_recovery();
-		#endif
-	}
-	void LGT_LCD_startup_settings()
-	{
-		if (ii_setup < STARTUP_COUNTER)
-		{
-			if (ii_setup >= (STARTUP_COUNTER-1000))
-			{
-				tartemp_flag = true;
-				if (card.cardOK)
-					LGT_LCD.LGT_Display_Filename();
-				if (check_recovery == false)
-				{
-					menu_type = eMENU_HOME;
-					LGT_LCD.LGT_Change_Page(ID_MENU_HOME);
-				}
-				else
-				{
-					return_home = true;
-					check_recovery = false;
-					enable_Z();
-					LGT_LCD.LGT_Change_Page(ID_DIALOG_PRINT_RECOVERY);
-				}
-				LGT_LCD.LGT_Printer_Data_Updata();
-				LGT_LCD.LGT_DW_Setup(); //about machine
-				ii_setup = STARTUP_COUNTER;
-			}
-			ii_setup++;
-		}
-		if (LGT_stop_printing == true)
-		{
-			LGT_stop_printing = false;
-			LGT_LCD.LGT_Stop_Printing();
-		}
-	}
-#endif     // LGT_MAC
-////////////LGT_MAC END/////////////////////LGT_MAC END////////////////////////////////LGT_MAC END////////////////////////  
-/*********************************************************************************
-********************************************************************************/
 /**
  * ***************************************************************************
  * ******************************** FUNCTIONS ********************************
@@ -833,6 +753,7 @@ XYZ_CONSTS_FROM_CONFIG(signed char, home_dir, HOME_DIR);
  */
 
 void stop();
+
 void get_available_commands();
 void process_next_command();
 void process_parsed_command();
@@ -1016,9 +937,9 @@ void setup_powerhold() {
   #endif
   #if HAS_POWER_SWITCH
     #if ENABLED(PS_DEFAULT_OFF)
-      PSU_OFF();
+      powersupply_on = true;  PSU_OFF();
     #else
-      PSU_ON();
+      powersupply_on = false; PSU_ON();
     #endif
   #endif
 }
@@ -1098,7 +1019,6 @@ void gcode_line_error(const char* err, bool doFlush = true) {
  * left on the serial port.
  */
 inline void get_serial_commands() {
-
   static char serial_line_buffer[MAX_CMD_SIZE];
   static bool serial_comment_mode = false;
 
@@ -1117,8 +1037,8 @@ inline void get_serial_commands() {
    * Loop while serial characters are incoming and the queue is not full
    */
   int c;
-  while (commands_in_queue < BUFSIZE && (((c = MYSERIAL0.read()) >= 0) )) 
-  {
+  while (commands_in_queue < BUFSIZE && (c = MYSERIAL0.read()) >= 0) {
+
     char serial_char = c;
 
     /**
@@ -1199,11 +1119,7 @@ inline void get_serial_commands() {
             wait_for_user = false;
           #endif
         }
-		if (strcmp(command, "M112") == 0) { 
-		#ifdef LGT_MAC
-			kill_type = M112_KILL;
-		#endif // LGT_MAC
-		 kill(PSTR(MSG_KILLED)); }
+        if (strcmp(command, "M112") == 0) kill(PSTR(MSG_KILLED));
         if (strcmp(command, "M410") == 0) quickstop_stepper();
       #endif
 
@@ -1327,8 +1243,6 @@ inline void get_serial_commands() {
 
     inline bool drain_job_recovery_commands() {
       static uint8_t job_recovery_commands_index = 0; // Resets on reboot
-	  //MYSERIAL0.println((int)job_recovery_commands_count);
-	  //MYSERIAL0.println(sizeof(job_recovery_commands));
       if (job_recovery_commands_count) {
         if (_enqueuecommand(job_recovery_commands[job_recovery_commands_index])) {
           ++job_recovery_commands_index;
@@ -1463,7 +1377,11 @@ bool get_target_extruder_from_command(const uint16_t code) {
       }
     #elif ENABLED(DELTA)
       soft_endstop_min[axis] = base_min_pos(axis);
-      soft_endstop_max[axis] = axis == Z_AXIS ? delta_height : base_max_pos(axis);
+      soft_endstop_max[axis] = axis == Z_AXIS ? delta_height
+      #if HAS_BED_PROBE
+        - zprobe_zoffset
+      #endif
+      : base_max_pos(axis);
     #else
       soft_endstop_min[axis] = base_min_pos(axis);
       soft_endstop_max[axis] = base_max_pos(axis);
@@ -1592,13 +1510,14 @@ static void set_axis_is_at_home(const AxisEnum axis) {
     }
     else
   #elif ENABLED(DELTA)
-    if (axis == Z_AXIS)
-      current_position[axis] = delta_height;
-    else
-  #endif
-  {
+    current_position[axis] = (axis == Z_AXIS ? delta_height
+    #if HAS_BED_PROBE
+      - zprobe_zoffset
+    #endif
+    : base_home_pos(axis));
+  #else
     current_position[axis] = base_home_pos(axis);
-  }
+  #endif
 
   /**
    * Z Probe Z Homing? Account for the probe's Z offset.
@@ -2152,40 +2071,240 @@ void clean_up_after_endstop_or_probe_move() {
 
   #if ENABLED(BLTOUCH)
 
-    void bltouch_command(int angle) {
-      MOVE_SERVO(Z_PROBE_SERVO_NR, angle);  // Give the BL-Touch the command and wait
-      safe_delay(BLTOUCH_DELAY);
+    typedef unsigned char BLTCommand;
+    void bltouch_init(const bool set_voltage=false);
+    bool bltouch_last_written_mode; // Initialized by settings.load, 0 = Open Drain; 1 = 5V Drain
+
+    bool bltouch_triggered() {
+      return (
+        #if ENABLED(Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN)
+          READ(Z_MIN_PIN) != Z_MIN_ENDSTOP_INVERTING
+        #else
+          READ(Z_MIN_PROBE_PIN) != Z_MIN_PROBE_ENDSTOP_INVERTING
+        #endif
+      );
     }
 
-    bool set_bltouch_deployed(const bool deploy) {
-      if (deploy && TEST_BLTOUCH()) {      // If BL-Touch says it's triggered
-        bltouch_command(BLTOUCH_RESET);    //  try to reset it.
-        bltouch_command(BLTOUCH_DEPLOY);   // Also needs to deploy and stow to
-        bltouch_command(BLTOUCH_STOW);     //  clear the triggered condition.
-        safe_delay(1500);                  // Wait for internal self-test to complete.
-                                           //  (Measured completion time was 0.65 seconds
-                                           //   after reset, deploy, and stow sequence)
-        if (TEST_BLTOUCH()) {              // If it still claims to be triggered...
-          SERIAL_ERROR_START();
-          SERIAL_ERRORLNPGM(MSG_STOP_BLTOUCH);
-          stop();                          // punt!
-          return true;
+    bool bltouch_command(const BLTCommand cmd, const millis_t &ms) {
+      #if ENABLED(DEBUG_LEVELING_FEATURE)
+        if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPAIR("BLTouch Command :", cmd);
+      #endif
+      MOVE_SERVO(Z_PROBE_SERVO_NR, cmd);
+      safe_delay(MAX(ms, (uint32_t)BLTOUCH_DELAY)); // BLTOUCH_DELAY is also the *minimum* delay
+      return bltouch_triggered();
+    }
+
+    // Native BLTouch commands ("Underscore"...), used in lcd menus and internally
+    void _bltouch_reset()              { bltouch_command(BLTOUCH_RESET, BLTOUCH_RESET_DELAY); }
+
+    void _bltouch_selftest()           { bltouch_command(BLTOUCH_SELFTEST, BLTOUCH_DELAY); }
+
+    void _bltouch_set_SW_mode()        { bltouch_command(BLTOUCH_SW_MODE, BLTOUCH_DELAY); }
+
+    void _bltouch_set_5V_mode()        { bltouch_command(BLTOUCH_5V_MODE, BLTOUCH_SET5V_DELAY); }
+    void _bltouch_set_OD_mode()        { bltouch_command(BLTOUCH_OD_MODE, BLTOUCH_SETOD_DELAY); }
+    void _bltouch_mode_store()         { bltouch_command(BLTOUCH_MODE_STORE, BLTOUCH_MODE_STORE_DELAY); }
+
+    void _bltouch_deploy()             { bltouch_command(BLTOUCH_DEPLOY, BLTOUCH_DEPLOY_DELAY); }
+    void _bltouch_stow()               { bltouch_command(BLTOUCH_STOW, BLTOUCH_STOW_DELAY); }
+
+    void _bltouch_reset_SW_mode()      { if (bltouch_triggered()) _bltouch_stow(); else _bltouch_deploy(); }
+
+    bool _bltouch_deploy_query_alarm() { return bltouch_command(BLTOUCH_DEPLOY, BLTOUCH_DEPLOY_DELAY); }
+    bool _bltouch_stow_query_alarm()   { return bltouch_command(BLTOUCH_STOW, BLTOUCH_STOW_DELAY); }
+
+    void bltouch_clear() {
+      _bltouch_reset();    // RESET or RESET_SW will clear an alarm condition but...
+                  // ...it will not clear a triggered condition in SW mode when the pin is currently up
+                  // ANTClabs <-- CODE ERROR
+      _bltouch_stow();     // STOW will pull up the pin and clear any triggered condition unless it fails, don't care
+      _bltouch_deploy();   // DEPLOY to test the probe. Could fail, don't care
+      _bltouch_stow();     // STOW to be ready for meaningful work. Could fail, don't care
+    }
+
+    bool bltouch_deploy_proc() {
+      // Do a DEPLOY
+      #if ENABLED(DEBUG_LEVELING_FEATURE)
+        if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("BLTouch DEPLOY requested");
+      #endif
+
+      // Attempt to DEPLOY, wait for DEPLOY_DELAY or ALARM
+      if (_bltouch_deploy_query_alarm()) {
+        // The deploy might have failed or the probe is already triggered (nozzle too low?)
+        #if ENABLED(DEBUG_LEVELING_FEATURE)
+          if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("BLTouch ALARM or TRIGGER after DEPLOY, recovering");
+        #endif
+
+        bltouch_clear();                               // Get the probe into start condition
+
+        // Last attempt to DEPLOY
+        if (_bltouch_deploy_query_alarm()) {
+          // The deploy might have failed or the probe is actually triggered (nozzle too low?) again
+          #if ENABLED(DEBUG_LEVELING_FEATURE)
+            if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("BLTouch Recovery Failed");
+          #endif
+
+          SERIAL_ECHOLN(MSG_STOP_BLTOUCH);  // Tell the user something is wrong, needs action
+          stop();                              // but it's not too bad, no need to kill, allow restart
+
+          return true;                         // Tell our caller we goofed in case he cares to know
         }
       }
 
-      bltouch_command(deploy ? BLTOUCH_DEPLOY : BLTOUCH_STOW);
-
-      #if ENABLED(DEBUG_LEVELING_FEATURE)
-        if (DEBUGGING(LEVELING)) {
-          SERIAL_ECHOPAIR("set_bltouch_deployed(", deploy);
-          SERIAL_CHAR(')');
-          SERIAL_EOL();
-        }
+      // One of the recommended ANTClabs ways to probe, using SW MODE
+      #if ENABLED(BLTOUCH_FORCE_SW_MODE)
+      _bltouch_set_SW_mode();
       #endif
 
+      // Now the probe is ready to issue a 10ms pulse when the pin goes up.
+      // The trigger STOW (see motion.cpp for example) will pull up the probes pin as soon as the pulse
+      // is registered.
+      #if ENABLED(DEBUG_LEVELING_FEATURE)
+        if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("bltouch.deploy_proc() end");
+      #endif
+
+      return false; // report success to caller
+    }
+
+    bool bltouch_stow_proc() {
+      // Do a STOW
+      #if ENABLED(DEBUG_LEVELING_FEATURE)
+        if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("BLTouch STOW requested");
+      #endif
+
+      // A STOW will clear a triggered condition in the probe (10ms pulse).
+      // At the moment that we come in here, we might (pulse) or will (SW mode) see the trigger on the pin.
+      // So even though we know a STOW will be ignored if an ALARM condition is active, we will STOW.
+      // Note: If the probe is deployed AND in an ALARM condition, this STOW will not pull up the pin
+      // and the ALARM condition will still be there. --> ANTClabs should change this behavior maybe
+
+      // Attempt to STOW, wait for STOW_DELAY or ALARM
+      if (_bltouch_stow_query_alarm()) {
+        // The stow might have failed
+        #if ENABLED(DEBUG_LEVELING_FEATURE)
+          if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("BLTouch ALARM or TRIGGER after STOW, recovering");
+        #endif
+
+        _bltouch_reset();                              // This RESET will then also pull up the pin. If it doesn't
+                                              // work and the pin is still down, there will no longer be
+                                              // an ALARM condition though.
+                                              // But one more STOW will catch that
+        // Last attempt to STOW
+        if (_bltouch_stow_query_alarm()) {             // so if there is now STILL an ALARM condition:
+          #if ENABLED(DEBUG_LEVELING_FEATURE)
+            if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("BLTouch Recovery Failed");
+          #endif
+
+          SERIAL_ECHOLN(MSG_STOP_BLTOUCH);  // Tell the user something is wrong, needs action
+          stop();                              // but it's not too bad, no need to kill, allow restart
+
+          return true;                         // Tell our caller we goofed in case he cares to know
+        }
+      }
+
+      #if ENABLED(DEBUG_LEVELING_FEATURE)
+        if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("bltouch.stow_proc() end");
+      #endif
+
+      return false; // report success to caller
+    }
+
+    bool bltouch_status_proc() {
+      /**
+       * Return a TRUE for "YES, it is DEPLOYED"
+       * This function will ensure switch state is reset after execution
+       */
+
+      #if ENABLED(DEBUG_LEVELING_FEATURE)
+        if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("BLTouch STATUS requested");
+      #endif
+
+      _bltouch_set_SW_mode();              // Incidentally, _set_SW_mode() will also RESET any active alarm
+      const bool tr = bltouch_triggered(); // If triggered in SW mode, the pin is up, it is STOWED
+
+      #if ENABLED(DEBUG_LEVELING_FEATURE)
+        if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPAIR("BLTouch is ", (int)tr);
+      #endif
+
+      if (tr) _bltouch_stow(); else _bltouch_deploy();  // Turn off SW mode, reset any trigger, honor pin state
+      return !tr;
+    }
+
+    void bltouch_mode_conv_proc(const bool M5V) {
+      /**
+       * BLTOUCH pre V3.0 and clones: No reaction at all to this sequence apart from a DEPLOY -> STOW
+       * BLTOUCH V3.0: This will set the mode (twice) and sadly, a STOW is needed at the end, because of the deploy
+       * BLTOUCH V3.1: This will set the mode and store it in the eeprom. The STOW is not needed but does not hurt
+       */
+      #if ENABLED(DEBUG_LEVELING_FEATURE)
+        if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPAIR("BLTouch Set Mode - ", (int)M5V);
+      #endif
+      _bltouch_deploy();
+      if (M5V) _bltouch_set_5V_mode(); else _bltouch_set_OD_mode();
+      _bltouch_mode_store();
+      if (M5V) _bltouch_set_5V_mode(); else _bltouch_set_OD_mode();
+      _bltouch_stow();
+      bltouch_last_written_mode = M5V;
+    }
+
+    bool set_bltouch_deployed(const bool deploy) {
+      if (deploy) _bltouch_deploy(); else _bltouch_stow();
       return false;
     }
 
+    void bltouch_mode_conv_5V()        { bltouch_mode_conv_proc(true); }
+    void bltouch_mode_conv_OD()        { bltouch_mode_conv_proc(false); }
+
+    // DEPLOY and STOW are wrapped for error handling - these are used by homing and by probing
+    bool bltouch_deploy()              { return bltouch_deploy_proc(); }
+    bool bltouch_stow()                { return bltouch_stow_proc(); }
+    bool bltouch_status()              { return bltouch_status_proc(); }
+
+    // Init the class and device. Call from setup().
+    void bltouch_init(const bool set_voltage/*=false*/) {
+      // Voltage Setting (if enabled). At every Marlin initialization:
+      // BLTOUCH < V3.0 and clones: This will be ignored by the probe
+      // BLTOUCH V3.0: SET_5V_MODE or SET_OD_MODE (if enabled).
+      //               OD_MODE is the default on power on, but setting it does not hurt
+      //               This mode will stay active until manual SET_OD_MODE or power cycle
+      // BLTOUCH V3.1: SET_5V_MODE or SET_OD_MODE (if enabled).
+      //               At power on, the probe will default to the eeprom settings configured by the user
+      _bltouch_reset();
+      _bltouch_stow();
+
+      #if ENABLED(BLTOUCH_FORCE_MODE_SET)
+
+        constexpr bool should_set = true;
+
+      #else
+        #if ENABLED(DEBUG_LEVELING_FEATURE)
+          if (DEBUGGING(LEVELING)) {
+            SERIAL_ECHOLNPAIR("last_written_mode - ", int(bltouch_last_written_mode));
+            SERIAL_ECHOLNPGM("config mode - "
+              #if ENABLED(BLTOUCH_SET_5V_MODE)
+                "BLTOUCH_SET_5V_MODE"
+              #else
+                "OD"
+              #endif
+            );
+          }
+        #endif
+
+        const bool should_set = bltouch_last_written_mode != (false
+          #if ENABLED(BLTOUCH_SET_5V_MODE)
+            || true
+          #endif
+        );
+
+      #endif
+
+      if (should_set && set_voltage)
+        bltouch_mode_conv_proc((false
+          #if ENABLED(BLTOUCH_SET_5V_MODE)
+            || true
+          #endif
+        ));
+    }
   #endif // BLTOUCH
 
   /**
@@ -2204,20 +2323,9 @@ void clean_up_after_endstop_or_probe_move() {
     if (zprobe_zoffset < 0) z_dest -= zprobe_zoffset;
 
     NOMORE(z_dest, Z_MAX_POS);
-#ifdef LGT_MAC
-	if (current_position[Z_AXIS] > 0)
-	{
-		if (z_dest > current_position[Z_AXIS]);
-		do_blocking_move_to_z(z_dest);
-	}
-	else
-	{
-		do_blocking_move_to_z(current_position[Z_AXIS] + z_dest);
-	}
-#else
-	if (z_dest > current_position[Z_AXIS]);
-	do_blocking_move_to_z(z_dest);
-#endif // LGT_MAC
+
+    if (z_dest > current_position[Z_AXIS])
+      do_blocking_move_to_z(z_dest);
   }
 
   // returns false for ok and true for failure
@@ -2569,7 +2677,6 @@ void clean_up_after_endstop_or_probe_move() {
       LCD_MESSAGEPGM(MSG_ERR_PROBING_FAILED);
       SERIAL_ERROR_START();
       SERIAL_ERRORLNPGM(MSG_ERR_PROBING_FAILED);
-	  leveling_sta = 2;  //failed
     }
 
     #if ENABLED(DEBUG_LEVELING_FEATURE)
@@ -3139,7 +3246,8 @@ static void do_homing_move(const AxisEnum axis, const float distance, const floa
     #if HOMING_Z_WITH_PROBE && QUIET_PROBING
       if (axis == Z_AXIS) probing_pause(false);
     #endif
-		  endstops.validate_homing_move();
+
+    endstops.validate_homing_move();
 
     // Re-enable stealthChop if used. Disable diag1 pin on driver.
     #if ENABLED(SENSORLESS_HOMING)
@@ -3599,7 +3707,8 @@ inline void gcode_G0_G1(
           const float e = clockwise ^ (r < 0) ? -1 : 1,             // clockwise -1/1, counterclockwise 1/-1
                       dx = p2 - p1, dy = q2 - q1,                   // X and Y differences
                       d = HYPOT(dx, dy),                            // Linear distance between the points
-                      h = SQRT(sq(r) - sq(d * 0.5f)),               // Distance to the arc pivot-point
+                      h2 = (r - 0.5f * d) * (r + 0.5f * d),         // factor to reduce rounding error
+                      h = (h2 >= 0) ? SQRT(h2) : 0.0f,              // Distance to the arc pivot-point
                       mx = (p1 + p2) * 0.5f, my = (q1 + q2) * 0.5f, // Point between the two points
                       sx = -dy / d, sy = dx / d,                    // Slope of the perpendicular bisector
                       cx = mx + e * h * sx, cy = my + e * h * sy;   // Pivot-point of the arc
@@ -4153,7 +4262,11 @@ inline void gcode_G4() {
     #endif
 
     // Move all carriages together linearly until an endstop is hit.
-    current_position[X_AXIS] = current_position[Y_AXIS] = current_position[Z_AXIS] = (delta_height + 10);
+    current_position[X_AXIS] = current_position[Y_AXIS] = current_position[Z_AXIS] = (delta_height + 10
+      #if HAS_BED_PROBE
+        - zprobe_zoffset
+      #endif
+    );
     feedrate_mm_s = homing_feedrate(X_AXIS);
     buffer_line_to_current_position();
     planner.synchronize();
@@ -4291,11 +4404,6 @@ inline void gcode_G4() {
  */
 inline void gcode_G28(const bool always_home_all) {
 
-#ifdef LGT_MAC
-	if (LGT_is_printing == false&& menu_type == eMENU_MOVE)
-		LGT_LCD.LGT_Change_Page(ID_DIALOG_MOVE_WAIT);
-#endif // LGT_MAC
-
   #if ENABLED(DEBUG_LEVELING_FEATURE)
     if (DEBUGGING(LEVELING)) {
       SERIAL_ECHOLNPGM(">>> G28");
@@ -4348,7 +4456,7 @@ inline void gcode_G28(const bool always_home_all) {
 
   #if ENABLED(BLTOUCH)
     // Make sure any BLTouch error condition is cleared
-    bltouch_command(BLTOUCH_RESET);
+    bltouch_command(BLTOUCH_RESET, BLTOUCH_RESET_DELAY);
     set_bltouch_deployed(false);
   #endif
 
@@ -4402,27 +4510,19 @@ inline void gcode_G28(const bool always_home_all) {
           (parser.seenval('R') ? parser.value_linear_units() : Z_HOMING_HEIGHT)
     );
 
-	if (z_homing_height && (home_all || homeX || homeY)) {
-		// Raise Z before homing any other axes and z is not already high enough (never lower z)
-		if (current_position[Z_AXIS] >= 0)
-		{
-			destination[Z_AXIS] = z_homing_height;
-			if (destination[Z_AXIS] > current_position[Z_AXIS]) {
+    if (z_homing_height && (home_all || homeX || homeY)) {
+      // Raise Z before homing any other axes and z is not already high enough (never lower z)
+      destination[Z_AXIS] = z_homing_height;
+      if (destination[Z_AXIS] > current_position[Z_AXIS]) {
 
-#if ENABLED(DEBUG_LEVELING_FEATURE)
-				if (DEBUGGING(LEVELING))
-					SERIAL_ECHOLNPAIR("Raise Z (before homing) to ", destination[Z_AXIS]);
-#endif
+        #if ENABLED(DEBUG_LEVELING_FEATURE)
+          if (DEBUGGING(LEVELING))
+            SERIAL_ECHOLNPAIR("Raise Z (before homing) to ", destination[Z_AXIS]);
+        #endif
 
-				do_blocking_move_to_z(destination[Z_AXIS]);
-			}
-		}
-		else
-		{
-			do_blocking_move_to_z(current_position[Z_AXIS]+ Z_HOMING_HEIGHT);
-		}
+        do_blocking_move_to_z(destination[Z_AXIS]);
+      }
     }
-
 
     #if ENABLED(QUICK_HOME)
 
@@ -4538,17 +4638,6 @@ inline void gcode_G28(const bool always_home_all) {
   #if ENABLED(DEBUG_LEVELING_FEATURE)
     if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPGM("<<< G28");
   #endif
-#ifdef LGT_MAC
-	if (LGT_is_printing == false && menu_type== eMENU_MOVE)
-	{
-		if(menu_move_dis_chk==0)
-			LGT_LCD.LGT_Change_Page(ID_MENU_MOVE_0);
-		else if(menu_move_dis_chk==1)
-			LGT_LCD.LGT_Change_Page(ID_MENU_MOVE_1);
-		else
-			LGT_LCD.LGT_Change_Page(ID_MENU_MOVE_1+1);
-	}
-#endif // LGT_MAC
 } // G28
 
 void home_all_axes() { gcode_G28(true); }
@@ -4706,7 +4795,8 @@ void home_all_axes() { gcode_G28(true); }
         if (parser.seenval('X')) {
           px = parser.value_int() - 1;
           if (!WITHIN(px, 0, GRID_MAX_POINTS_X - 1)) {
-            SERIAL_PROTOCOLLNPGM("X out of range (1-" STRINGIFY(GRID_MAX_POINTS_X) ").");
+            SERIAL_PROTOCOLPAIR("X out of range (1-", int(GRID_MAX_POINTS_X));
+            SERIAL_PROTOCOLLNPGM(")");
             return;
           }
         }
@@ -4718,7 +4808,8 @@ void home_all_axes() { gcode_G28(true); }
         if (parser.seenval('Y')) {
           py = parser.value_int() - 1;
           if (!WITHIN(py, 0, GRID_MAX_POINTS_Y - 1)) {
-            SERIAL_PROTOCOLLNPGM("Y out of range (1-" STRINGIFY(GRID_MAX_POINTS_Y) ").");
+            SERIAL_PROTOCOLPAIR("Y out of range (1-", int(GRID_MAX_POINTS_Y));
+            SERIAL_PROTOCOLLNPGM(")");
             return;
           }
         }
@@ -5493,10 +5584,7 @@ void home_all_axes() { gcode_G28(true); }
 
         if (!dryrun) extrapolate_unprobed_bed_level();
         print_bilinear_leveling_grid();
-#ifdef LK1_Pro
-		leveling_sta = 1;  //ok
-		settings.save();
-#endif // LK1_Pro
+
         refresh_bed_level();
 
         #if ENABLED(ABL_BILINEAR_SUBDIVISION)
@@ -5667,7 +5755,12 @@ void home_all_axes() { gcode_G28(true); }
 
           // Unapply the offset because it is going to be immediately applied
           // and cause compensation movement in Z
-          current_position[Z_AXIS] -= bilinear_z_offset(current_position);
+          #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
+            const float fade_scaling_factor = planner.fade_scaling_factor_for_z(current_position[Z_AXIS]);
+          #else
+            constexpr float fade_scaling_factor = 1.0f;
+          #endif
+          current_position[Z_AXIS] -= fade_scaling_factor * bilinear_z_offset(current_position);
 
           #if ENABLED(DEBUG_LEVELING_FEATURE)
             if (DEBUGGING(LEVELING)) SERIAL_ECHOLNPAIR(" corrected Z:", current_position[Z_AXIS]);
@@ -5866,12 +5959,6 @@ void home_all_axes() { gcode_G28(true); }
     if ((!end_stops && tower_angles) || (end_stops && !tower_angles)) { // XOR
       SERIAL_PROTOCOLPAIR("  Radius:", delta_radius);
     }
-    #if HAS_BED_PROBE
-      if (!end_stops && !tower_angles) {
-        SERIAL_PROTOCOL_SP(30);
-        print_signed_float(PSTR("Offset"), zprobe_zoffset);
-      }
-    #endif
     SERIAL_EOL();
   }
 
@@ -5920,30 +6007,19 @@ void home_all_axes() { gcode_G28(true); }
   /**
    *  - Probe a point
    */
-  static float calibration_probe(const float &nx, const float &ny, const bool stow, const bool set_up) {
+  static float calibration_probe(const float &nx, const float &ny, const bool stow) {
     #if HAS_BED_PROBE
-      return probe_pt(nx, ny, set_up ? PROBE_PT_BIG_RAISE : stow ? PROBE_PT_STOW : PROBE_PT_RAISE, 0, false);
+      return probe_pt(nx, ny, stow ? PROBE_PT_STOW : PROBE_PT_RAISE, 0, false);
     #else
       UNUSED(stow);
-      UNUSED(set_up);
       return lcd_probe_pt(nx, ny);
     #endif
   }
 
-  #if HAS_BED_PROBE && ENABLED(ULTIPANEL)
-    static float probe_z_shift(const float center) {
-      STOW_PROBE();
-      endstops.enable_z_probe(false);
-      float z_shift = lcd_probe_pt(0, 0) - center;
-      endstops.enable_z_probe(true);
-      return z_shift;
-    }
-  #endif
-
   /**
    *  - Probe a grid
    */
-  static bool probe_calibration_points(float z_pt[NPP + 1], const int8_t probe_points, const bool towers_set, const bool stow_after_each, const bool set_up) {
+  static bool probe_calibration_points(float z_pt[NPP + 1], const int8_t probe_points, const bool towers_set, const bool stow_after_each) {
     const bool _0p_calibration      = probe_points == 0,
                _1p_calibration      = probe_points == 1 || probe_points == -1,
                _4p_calibration      = probe_points == 2,
@@ -5966,7 +6042,7 @@ void home_all_axes() { gcode_G28(true); }
     if (!_0p_calibration) {
 
       if (!_7p_no_intermediates && !_7p_4_intermediates && !_7p_11_intermediates) { // probe the center
-        z_pt[CEN] += calibration_probe(0, 0, stow_after_each, set_up);
+        z_pt[CEN] += calibration_probe(0, 0, stow_after_each);
         if (isnan(z_pt[CEN])) return false;
       }
 
@@ -5976,7 +6052,7 @@ void home_all_axes() { gcode_G28(true); }
         I_LOOP_CAL_PT(rad, start, steps) {
           const float a = RADIANS(210 + (360 / NPP) *  (rad - 1)),
                       r = delta_calibration_radius * 0.1;
-          z_pt[CEN] += calibration_probe(cos(a) * r, sin(a) * r, stow_after_each, set_up);
+          z_pt[CEN] += calibration_probe(cos(a) * r, sin(a) * r, stow_after_each);
           if (isnan(z_pt[CEN])) return false;
        }
         z_pt[CEN] /= float(_7p_2_intermediates ? 7 : probe_points);
@@ -6000,7 +6076,7 @@ void home_all_axes() { gcode_G28(true); }
             const float a = RADIANS(210 + (360 / NPP) *  (rad - 1)),
                         r = delta_calibration_radius * (1 - 0.1 * (zig_zag ? offset - circle : circle)),
                         interpol = fmod(rad, 1);
-            const float z_temp = calibration_probe(cos(a) * r, sin(a) * r, stow_after_each, set_up);
+            const float z_temp = calibration_probe(cos(a) * r, sin(a) * r, stow_after_each);
             if (isnan(z_temp)) return false;
             // split probe point to neighbouring calibration points
             z_pt[uint8_t(LROUND(rad - interpol + NPP - 1)) % NPP + 1] += z_temp * sq(cos(RADIANS(interpol * 90)));
@@ -6129,10 +6205,7 @@ void home_all_axes() { gcode_G28(true); }
    *
    * Parameters:
    *
-   *   S   Setup mode; disables probe protection
-   *
    *   Pn  Number of probe points:
-   *      P-1      Checks the z_offset with a center probe and paper test.
    *      P0       Normalizes calibration.
    *      P1       Calibrates height only with center probe.
    *      P2       Probe center and towers. Calibrate height, endstops and delta radius.
@@ -6155,22 +6228,15 @@ void home_all_axes() { gcode_G28(true); }
    */
   inline void gcode_G33() {
 
-    const bool set_up =
-      #if HAS_BED_PROBE
-        parser.seen('S');
-      #else
-        false;
-      #endif
-
-    const int8_t probe_points = set_up ? 2 : parser.intval('P', DELTA_CALIBRATION_DEFAULT_POINTS);
-    if (!WITHIN(probe_points, -1, 10)) {
-      SERIAL_PROTOCOLLNPGM("?(P)oints is implausible (-1 - 10).");
+    const int8_t probe_points = parser.intval('P', DELTA_CALIBRATION_DEFAULT_POINTS);
+    if (!WITHIN(probe_points, 0, 10)) {
+      SERIAL_PROTOCOLLNPGM("?(P)oints is implausible (0-10).");
       return;
     }
 
     const bool towers_set = !parser.seen('T');
 
-    const float calibration_precision = set_up ? Z_CLEARANCE_BETWEEN_PROBES / 5.0 : parser.floatval('C', 0.0);
+    const float calibration_precision = parser.floatval('C', 0.0);
     if (calibration_precision < 0) {
       SERIAL_PROTOCOLLNPGM("?(C)alibration precision is implausible (>=0).");
       return;
@@ -6178,25 +6244,17 @@ void home_all_axes() { gcode_G28(true); }
 
     const int8_t force_iterations = parser.intval('F', 0);
     if (!WITHIN(force_iterations, 0, 30)) {
-      SERIAL_PROTOCOLLNPGM("?(F)orce iteration is implausible (0 - 30).");
+      SERIAL_PROTOCOLLNPGM("?(F)orce iteration is implausible (0-30).");
       return;
     }
 
     const int8_t verbose_level = parser.byteval('V', 1);
     if (!WITHIN(verbose_level, 0, 3)) {
-      SERIAL_PROTOCOLLNPGM("?(V)erbose level is implausible (0 - 3).");
+      SERIAL_PROTOCOLLNPGM("?(V)erbose level is implausible (0-3).");
       return;
     }
 
     const bool stow_after_each = parser.seen('E');
-
-    if (set_up) {
-      delta_height = 999.99;
-      delta_radius = DELTA_PRINTABLE_RADIUS;
-      ZERO(delta_endstop_adj);
-      ZERO(delta_tower_angle_trim);
-      recalc_delta_settings();
-    }
 
     const bool _0p_calibration      = probe_points == 0,
                _1p_calibration      = probe_points == 1 || probe_points == -1,
@@ -6246,7 +6304,6 @@ void home_all_axes() { gcode_G28(true); }
     const char *checkingac = PSTR("Checking... AC");
     serialprintPGM(checkingac);
     if (verbose_level == 0) SERIAL_PROTOCOLPGM(" (DRY-RUN)");
-    if (set_up) SERIAL_PROTOCOLPGM("  (SET-UP)");
     SERIAL_EOL();
     lcd_setstatusPGM(checkingac);
 
@@ -6265,7 +6322,7 @@ void home_all_axes() { gcode_G28(true); }
 
       // Probe the points
       zero_std_dev_old = zero_std_dev;
-      if (!probe_calibration_points(z_at_pt, probe_points, towers_set, stow_after_each, set_up)) {
+      if (!probe_calibration_points(z_at_pt, probe_points, towers_set, stow_after_each)) {
         SERIAL_PROTOCOLLNPGM("Correct delta settings with M665 and M666");
         return AC_CLEANUP();
       }
@@ -6313,11 +6370,6 @@ void home_all_axes() { gcode_G28(true); }
         delta_calibration_radius = cr_old;
 
         switch (probe_points) {
-          case -1:
-            #if HAS_BED_PROBE && ENABLED(ULTIPANEL)
-              zprobe_zoffset += probe_z_shift(z_at_pt[CEN]);
-            #endif
-
           case 0:
             test_precision = 0.00; // forced end
             break;
@@ -7356,7 +7408,6 @@ inline void gcode_M17() {
    *
    * Used by M125 and M600
    */
-  
   static void wait_for_filament_reload(const int8_t max_beep_count=0) {
     bool nozzle_timed_out = false;
 
@@ -7442,7 +7493,7 @@ inline void gcode_M17() {
     }
     KEEPALIVE_STATE(IN_HANDLER);
   }
- 
+
   /**
    * Resume or Start print procedure
    *
@@ -7461,7 +7512,7 @@ inline void gcode_M17() {
    * - Send host action for resume, if configured
    * - Resume the current SD print job, if any
    */
- /* static*/ void resume_print(const float &slow_load_length=0, const float &fast_load_length=0, const float &purge_length=ADVANCED_PAUSE_PURGE_LENGTH, const int8_t max_beep_count=0) {
+  static void resume_print(const float &slow_load_length=0, const float &fast_load_length=0, const float &purge_length=ADVANCED_PAUSE_PURGE_LENGTH, const int8_t max_beep_count=0) {
     if (!did_pause_print) return;
 
     // Re-enable the heaters if they timed out
@@ -7575,10 +7626,7 @@ inline void gcode_M17() {
 
     #if ENABLED(POWER_LOSS_RECOVERY)
       if (parser.seenval('T'))
-		#ifndef LGT_MAC
-			 print_job_timer.resume(parser.value_long());
-		#endif // LGT_MAC
-	  ;
+        print_job_timer.resume(parser.value_long());
       else
     #endif
         print_job_timer.start();
@@ -7588,16 +7636,12 @@ inline void gcode_M17() {
    * M25: Pause SD Print
    */
   inline void gcode_M25() {
-	//save_feedtate = feedrate_mm_s;
     card.pauseSDPrint();
     print_job_timer.pause();
+
     #if ENABLED(PARK_HEAD_ON_PAUSE)
-		//enqueue_and_echo_commands_P(PSTR("M125 L0 X10 Y260 Z0")); // Must be enqueued with pauseSDPrint set to be last in the buffer
+      enqueue_and_echo_commands_P(PSTR("M125")); // Must be enqueued with pauseSDPrint set to be last in the buffer
     #endif
-	#ifdef LGT_MAC
-		  status_type = PRINTER_PAUSE;
-		  enqueue_and_echo_commands_P(PSTR("M2003"));
-	#endif // LGT_MAC
   }
 
   /**
@@ -8001,9 +8045,9 @@ inline void gcode_M42() {
 
     // Enable or disable endstop monitoring
     if (parser.seen('E')) {
-      endstop_monitor_flag = parser.value_bool();
+      endstops.monitor_flag = parser.value_bool();
       SERIAL_PROTOCOLPGM("endstop monitor ");
-      serialprintPGM(endstop_monitor_flag ? PSTR("en") : PSTR("dis"));
+      serialprintPGM(endstops.monitor_flag ? PSTR("en") : PSTR("dis"));
       SERIAL_PROTOCOLLNPGM("abled");
       return;
     }
@@ -8344,7 +8388,7 @@ inline void gcode_M42() {
    *   This has no effect during an SD print job
    */
   inline void gcode_M73() {
-    if (!IS_SD_PRINTING && parser.seen('P')) {
+    if (!IS_SD_PRINTING() && parser.seen('P')) {
       progress_bar_percent = parser.value_byte();
       NOMORE(progress_bar_percent, 100);
     }
@@ -8393,6 +8437,7 @@ inline void gcode_M104() {
   if (parser.seenval('S')) {
     const int16_t temp = parser.value_celsius();
     thermalManager.setTargetHotend(temp, target_extruder);
+
     #if ENABLED(DUAL_X_CARRIAGE)
       if (dual_x_carriage_mode == DXC_DUPLICATION_MODE && target_extruder == 0)
         thermalManager.setTargetHotend(temp ? temp + duplicate_extruder_temp_offset : 0, 1);
@@ -8479,13 +8524,11 @@ inline void gcode_M105() {
               new_fanSpeeds[p] = MIN(t, 255);
               break;
           }
-		  //fanspeed_flag = true;
           return;
         }
       #endif // EXTRA_FAN_SPEED
       const uint16_t s = parser.ushortval('S', 255);
       fanSpeeds[p] = MIN(s, 255U);
-	  //fanspeed_flag = true;
     }
   }
 
@@ -8495,7 +8538,6 @@ inline void gcode_M105() {
   inline void gcode_M107() {
     const uint16_t p = parser.ushortval('P');
     if (p < FAN_COUNT) fanSpeeds[p] = 0;
-	//fanspeed_flag = false;
   }
 
 #endif // FAN_COUNT > 0
@@ -8511,11 +8553,7 @@ inline void gcode_M105() {
   /**
    * M112: Emergency Stop
    */
-  inline void gcode_M112() {
-		#ifdef LGT_MAC
-			  kill_type = M112_KILL;
-		#endif // LGT_MAC 
-	  kill(PSTR(MSG_KILLED)); }
+  inline void gcode_M112() { kill(PSTR(MSG_KILLED)); }
 
 
   /**
@@ -8554,24 +8592,6 @@ inline void gcode_M109() {
   if (set_temp) {
     const int16_t temp = parser.value_celsius();
     thermalManager.setTargetHotend(temp, target_extruder);
-#ifdef LGT_MAC
-	if (LGT_is_printing)
-	{
-		LGT_LCD.LGT_Send_Data_To_Screen(ADDR_VAL_ICON_HIDE, 0);
-		LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-		LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_HOME, 5, 0);
-		LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-		delay(50);
-#ifdef LK1_Pro
-		LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_TUNE, 1797, 0);
-#else
-		LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_TUNE, 1541, 0);
-#endif
-		LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-		delay(50);
-		LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_HOME, 517, 0);
-	}
-#endif // LGT_MAC
 
     #if ENABLED(DUAL_X_CARRIAGE)
       if (dual_x_carriage_mode == DXC_DUPLICATION_MODE && target_extruder == 0)
@@ -8655,6 +8675,7 @@ inline void gcode_M109() {
       #endif
       SERIAL_EOL();
     }
+
     idle();
     reset_stepper_timeout(); // Keep steppers powered
 
@@ -8714,23 +8735,6 @@ inline void gcode_M109() {
   #if DISABLED(BUSY_WHILE_HEATING)
     KEEPALIVE_STATE(IN_HANDLER);
   #endif
-#ifdef LGT_MAC
-	if (LGT_is_printing)
-	{
-		LGT_LCD.LGT_Send_Data_To_Screen(ADDR_VAL_ICON_HIDE, 1);
-		LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_HOME, 5, 1);
-		LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-		delay(50);
-#ifdef LK1_Pro
-		LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_TUNE, 1797, 1);
-#else
-		LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_TUNE, 1541, 1);
-#endif
-		LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-		delay(50);
-		LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_HOME, 517, 1);
-	}
-#endif // LGT_MAC
 }
 
 #if HAS_HEATED_BED
@@ -8760,24 +8764,6 @@ inline void gcode_M109() {
     const bool no_wait_for_cooling = parser.seenval('S');
     if (no_wait_for_cooling || parser.seenval('R')) {
       thermalManager.setTargetBed(parser.value_celsius());
-	#ifdef LGT_MAC
-	  if (LGT_is_printing)
-	  {
-		  LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-		  LGT_LCD.LGT_Send_Data_To_Screen(ADDR_VAL_ICON_HIDE, 0);
-		  LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_HOME, 5, 0);
-		  LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-		  delay(50);
-#ifdef LK1_Pro
-		  LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_TUNE, 1797, 0);
-#else
-		  LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_TUNE, 1541, 0);
-#endif
-		  LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-		  delay(50);
-		  LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_HOME, 517, 0);
-	  }
-	#endif // LGT_MAC
       #if ENABLED(PRINTJOB_TIMER_AUTOSTART)
         if (parser.value_celsius() > BED_MINTEMP)
           print_job_timer.start();
@@ -8835,6 +8821,7 @@ inline void gcode_M109() {
         #endif
         SERIAL_EOL();
       }
+
       idle();
       reset_stepper_timeout(); // Keep steppers powered
 
@@ -8888,16 +8875,6 @@ inline void gcode_M109() {
     #if DISABLED(BUSY_WHILE_HEATING)
       KEEPALIVE_STATE(IN_HANDLER);
     #endif
-	#ifdef LGT_MAC
-	  //LGT_LCD.LGT_Send_Data_To_Screen(ADDR_VAL_ICON_HIDE,1);
-	//  LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_HOME, 5, 1);
-	  //LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-	  //delay(50);
-	  //LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_TUNE, 1797, 1);
-	  //LGT_LCD.LGT_Get_MYSERIAL1_Cmd();
-	  //delay(50);
-	  //LGT_LCD.LGT_Disable_Enable_Screen_Button(ID_MENU_PRINT_HOME, 517, 1);
-	#endif // LGT_MAC
   }
 
 #endif // HAS_HEATED_BED
@@ -10296,7 +10273,7 @@ inline void gcode_M226() {
         NOLESS(thermalManager.lpq_len, 0);
       #endif
 
-      thermalManager.updatePID();
+      thermalManager.update_pid();
       SERIAL_ECHO_START();
       #if ENABLED(PID_PARAMS_PER_HOTEND)
         SERIAL_ECHOPAIR(" e:", e); // specify extruder in serial output
@@ -10442,7 +10419,7 @@ inline void gcode_M303() {
       KEEPALIVE_STATE(NOT_BUSY);
     #endif
 
-    thermalManager.PID_autotune(temp, e, c, u);
+    thermalManager.pid_autotune(temp, e, c, u);
 
     #if DISABLED(BUSY_WHILE_HEATING)
       KEEPALIVE_STATE(IN_HANDLER);
@@ -11032,6 +11009,17 @@ inline void gcode_M502() {
   }
 #endif
 
+#if ENABLED(SDSUPPORT)
+
+  /**
+   * M524: Abort the current SD print job (started with M24)
+   */
+  inline void gcode_M524() {
+    if (IS_SD_PRINTING()) card.abort_sd_printing = true;
+  }
+
+#endif // SDSUPPORT
+
 #if ENABLED(ABORT_ON_ENDSTOP_HIT_FEATURE_ENABLED)
 
   /**
@@ -11196,9 +11184,6 @@ inline void gcode_M502() {
     // Move XY axes to filament change position or given position
     if (parser.seenval('X')) park_point.x = parser.linearval('X');
     if (parser.seenval('Y')) park_point.y = parser.linearval('Y');
-
-	if (parser.linearval('F') > 0.0)
-		feedrate_mm_s = MMM_TO_MMS(parser.value_feedrate());
 
     #if HOTENDS > 1 && DISABLED(DUAL_X_CARRIAGE) && DISABLED(DELTA)
       park_point.x += (active_extruder ? hotend_offset[X_AXIS][active_extruder] : 0);
@@ -12300,7 +12285,6 @@ inline void gcode_M999() {
   flush_and_request_resend();
 }
 
-
 #if DO_SWITCH_EXTRUDER
   #if EXTRUDERS > 3
     #define REQ_ANGLES 4
@@ -12895,42 +12879,10 @@ void process_parsed_command() {
         case 27: gcode_G27(); break;                              // G27: Park Nozzle
       #endif
 
-      case 28: gcode_G28(false);
-		#if ENABLED(LK1_Pro_AutoBed)
-			set_bed_leveling_enabled(true);
-		#endif
-		  break;                           // G28: Home one or more axes
+      case 28: gcode_G28(false); break;                           // G28: Home one or more axes
 
       #if HAS_LEVELING
-        case 29: gcode_G29(); 
-#ifdef LGT_MAC
-			if (leveling_sta ==1)   //ok
-			{
-				leveling_sta = 0;
-				if (LGT_is_printing == false)
-				{
-					LGT_LCD.LGT_Change_Page(ID_MENU_MEASU_FINISH);
-					disable_all_steppers();
-				}
-			}
-			else if (leveling_sta == 2)  //failed
-			{
-				if (LGT_is_printing == false)
-				{
-					leveling_sta = 0;
-					LGT_LCD.LGT_Change_Page(ID_DIALOG_LEVEL_FAILE);
-					disable_all_steppers();
-				}
-				else
-				{
-					LGT_LCD.LGT_Change_Page(ID_DIALOG_PRINT_LEVEL_FAILE);
-					wait_for_heatup = false;
-					LGT_stop_printing = true;
-					LGT_LCD.LGT_Exit_Print_Page();
-				}
-			}
-#endif // LGT_MAC
-			break;                              // G29: Detailed Z probe
+        case 29: gcode_G29(); break;                              // G29: Detailed Z probe
       #endif
 
       #if HAS_BED_PROBE
@@ -13247,6 +13199,10 @@ void process_parsed_command() {
         case 504: gcode_M504(); break;                            // M504: Validate EEPROM
       #endif
 
+      #if ENABLED(SDSUPPORT)
+        case 524: gcode_M524(); break;                            // M524: Abort SD print job
+      #endif
+
       #if ENABLED(ABORT_ON_ENDSTOP_HIT_FEATURE_ENABLED)
         case 540: gcode_M540(); break;                            // M540: Set Abort on Endstop Hit for SD Printing
       #endif
@@ -13334,68 +13290,7 @@ void process_parsed_command() {
       #endif
 
       case 999: gcode_M999(); break;                              // M999: Restart after being Stopped
-#ifdef LGT_MAC
-	  case 2000:   //stop printing and return to home menu
-		  relative_mode = false;
-		  gcode_M18_M84();
-		  LGT_is_printing = false;
-		  if (leveling_sta!=2)
-		  {
-			  LGT_LCD.LGT_Change_Page(ID_MENU_HOME);
-		  }
-		  else
-		  {
-			  leveling_sta=0;
-		  }
-		  runout.reset();
-		  break;
-	  case 2001:	// wait for printing pausing
-		  LGT_Pause_Move();
-		  LGT_LCD.LGT_Change_Page(ID_MENU_PRINT_HOME_PAUSE);
-		  break;
-	#ifdef LK1_Pro
-	  case 2002:	// wait for levelling measuring 
-		  planner.synchronize();
-		  LGT_LCD.LGT_Change_Page(ID_MENU_MEASU_S1 + 1);
-		  break;
-	#endif // LK1_Pro
-	  case 2003:      //save position and filament runout  move
-		  LGT_Pause_Move();
-		  break;
-	  case 2004:  //load filament
-		  LGT_LCD.LGT_Change_Filament(LOAD_FILA_LEN);
-		  break;
-	  case 2005:  //unload filament
-		  LGT_LCD.LGT_Change_Filament(UNLOAD_FILA_LEN);
-		  break;
-	  case 2006:   //filament change in printing
-		  LGT_Pause_Move();
-		  LGT_LCD.LGT_Change_Page(ID_MENU_HOME_FILA_0);
-		  menu_type = eMENU_HOME_FILA;
-		  break;
-	  case 2007:
-		  if (parser.seen('Z'))
-		  {
-			  current_position[Z_AXIS] = parser.value_linear_units();
-			  LGT_Line_To_Current(Z_AXIS);
-			  planner.set_z_position_mm((destination[Z_AXIS] = current_position[Z_AXIS] = 0));
-		  }
-		  else if (parser.seen('E'))
-		  {
-			  current_position[E_AXIS] = parser.value_linear_units();
-			  LGT_Line_To_Current(E_AXIS);
-			  planner.set_e_position_mm((destination[E_CART] = current_position[E_CART] = 0));
-		  }
-		  break;
-	  case 2008:
-		  for (int add = EEPROM_INDEX; add < (EEPROM_INDEX + 4); add++)
-		  {
-			  eeprom_write_byte((uint8_t *)add, (uint8_t)0);
-			  MYSERIAL0.println((int)eeprom_read_byte((const uint8_t *)add));
-		  }
-		break;
-#endif // LGT_MAC
-	 
+
       default: parser.unknown_command_error();
     }
     break;
@@ -14911,7 +14806,7 @@ void prepare_move_to_destination() {
 
 #if ENABLED(TEMP_STAT_LEDS)
 
-  static bool red_led = false;
+  static uint8_t red_led = -1;  // Invalid value to force leds initializzation on startup
   static millis_t next_status_led_update_ms = 0;
 
   void handle_status_leds(void) {
@@ -14919,20 +14814,18 @@ void prepare_move_to_destination() {
       next_status_led_update_ms += 500; // Update every 0.5s
       float max_temp = 0.0;
       #if HAS_HEATED_BED
-        max_temp = MAX3(max_temp, thermalManager.degTargetBed(), thermalManager.degBed());
+        max_temp = MAX(thermalManager.degTargetBed(), thermalManager.degBed());
       #endif
       HOTEND_LOOP()
         max_temp = MAX3(max_temp, thermalManager.degHotend(e), thermalManager.degTargetHotend(e));
-      const bool new_led = (max_temp > 55.0) ? true : (max_temp < 54.0) ? false : red_led;
+      const uint8_t new_led = (max_temp > 55.0) ? HIGH : (max_temp < 54.0 || red_led == -1) ? LOW : red_led;
       if (new_led != red_led) {
         red_led = new_led;
         #if PIN_EXISTS(STAT_LED_RED)
-          WRITE(STAT_LED_RED_PIN, new_led ? HIGH : LOW);
-          #if PIN_EXISTS(STAT_LED_BLUE)
-            WRITE(STAT_LED_BLUE_PIN, new_led ? LOW : HIGH);
-          #endif
-        #else
-          WRITE(STAT_LED_BLUE_PIN, new_led ? HIGH : LOW);
+          WRITE(STAT_LED_RED_PIN, new_led);
+        #endif
+        #if PIN_EXISTS(STAT_LED_BLUE)
+          WRITE(STAT_LED_BLUE_PIN, !new_led);
         #endif
       }
     }
@@ -15011,9 +14904,6 @@ void manage_inactivity(const bool ignore_stepper_queue/*=false*/) {
   if (max_inactive_time && ELAPSED(ms, previous_move_ms + max_inactive_time)) {
     SERIAL_ERROR_START();
     SERIAL_ECHOLNPAIR(MSG_KILL_INACTIVE_TIME, parser.command_ptr);
-	#ifdef LGT_MAC
-		kill_type = TIMEOUT_KILL;
-	#endif // LGT_MAC
     kill(PSTR(MSG_KILLED));
   }
 
@@ -15080,7 +14970,7 @@ void manage_inactivity(const bool ignore_stepper_queue/*=false*/) {
     // ---------------------------------------------------------
     static int homeDebounceCount = 0;   // poor man's debouncing count
     const int HOME_DEBOUNCE_DELAY = 2500;
-    if (!IS_SD_PRINTING && !READ(HOME_PIN)) {
+    if (!IS_SD_PRINTING() && !READ(HOME_PIN)) {
       if (!homeDebounceCount) {
         enqueue_and_echo_commands_P(PSTR("G28"));
         LCD_MESSAGEPGM(MSG_AUTO_HOME);
@@ -15207,15 +15097,14 @@ void idle(
     max7219.idle_tasks();
   #endif
 
-	//lcd_update();
+  lcd_update();
+
   host_keepalive();
 
   manage_inactivity(
-#ifdef LGT_MAC
-	  LGT_is_printing
-#elif ENABLED(ADVANCED_PAUSE_FEATURE)
+    #if ENABLED(ADVANCED_PAUSE_FEATURE)
       no_stepper_sleep
-#endif //LGT_MAC
+    #endif
   );
 
   thermalManager.manage_heater();
@@ -15246,9 +15135,6 @@ void idle(
       #endif
     }
   #endif
-#ifdef LGT_MAC
-	DWIN_MAIN_FUNCTIONS();
-#endif // LGT_MAC
 }
 
 /**
@@ -15258,12 +15144,6 @@ void idle(
 void kill(const char* lcd_msg) {
   SERIAL_ERROR_START();
   SERIAL_ERRORLNPGM(MSG_ERR_KILLED);
-
-#ifdef LGT_MAC
-    LGT_LCD.LGT_Print_Cause_Of_Kill();
-	LGT_LCD.LGT_Change_Page(ID_CRASH_KILLED);
-#endif // LGT_MAC
-
 
   thermalManager.disable_all_heaters();
   disable_all_steppers();
@@ -15358,9 +15238,11 @@ void setup() {
   #if HAS_STEPPER_RESET
     disableStepperDrivers();
   #endif
+
   MYSERIAL0.begin(BAUDRATE);
   SERIAL_PROTOCOLLNPGM("start");
   SERIAL_ECHO_START();
+
   // Prepare communication for TMC drivers
   #if HAS_DRIVER(TMC2130)
     tmc_init_cs_pins();
@@ -15530,7 +15412,7 @@ void setup() {
 
   #if ENABLED(BLTOUCH)
     // Make sure any BLTouch error condition is cleared
-    bltouch_command(BLTOUCH_RESET);
+    bltouch_command(BLTOUCH_RESET, BLTOUCH_RESET_DELAY);
     set_bltouch_deployed(false);
   #endif
 
@@ -15561,13 +15443,10 @@ void setup() {
     #endif
   #endif
 
-  //#if ENABLED(POWER_LOSS_RECOVERY)
-  //  check_print_job_recovery();
-  //#endif
-#ifdef LGT_MAC
-	  LGT_Init();
-#endif // LGT_MAC
-//
+  #if ENABLED(POWER_LOSS_RECOVERY)
+    check_print_job_recovery();
+  #endif
+
   #if ENABLED(USE_WATCHDOG)
     watchdog_init();
   #endif
@@ -15579,7 +15458,7 @@ void setup() {
     enable_D();
   #endif
 
-  #if ENABLED(SDSUPPORT) && DISABLED(ULTRA_LCD)
+  #if ENABLED(SDSUPPORT) && !(ENABLED(ULTRA_LCD) && PIN_EXISTS(SD_DETECT))
     card.beginautostart();
   #endif
 }
@@ -15596,11 +15475,30 @@ void setup() {
  *  - Call LCD update
  */
 void loop() {
-  #ifdef LGT_MAC
-	LGT_LCD_startup_settings();
-  #endif // LGT_MAC
+
   #if ENABLED(SDSUPPORT)
+
     card.checkautostart();
+
+    if (card.abort_sd_printing) {
+      card.stopSDPrint(
+        #if SD_RESORT
+          true
+        #endif
+      );
+      clear_command_queue();
+      quickstop_stepper();
+      print_job_timer.stop();
+      thermalManager.disable_all_heaters();
+      #if FAN_COUNT > 0
+        for (uint8_t i = 0; i < FAN_COUNT; i++) fanSpeeds[i] = 0;
+      #endif
+      wait_for_heatup = false;
+      #if ENABLED(POWER_LOSS_RECOVERY)
+        card.removeJobRecoveryFile();
+      #endif
+    }
+
   #endif // SDSUPPORT
 
   if (commands_in_queue < BUFSIZE) get_available_commands();
@@ -15639,9 +15537,7 @@ void loop() {
       else {
         process_next_command();
         #if ENABLED(POWER_LOSS_RECOVERY)
-		if (card.cardOK && card.sdprinting) {
-			save_job_recovery_info();
-		}
+          if (card.cardOK && card.sdprinting) save_job_recovery_info();
         #endif
       }
 

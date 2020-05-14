@@ -34,13 +34,7 @@
 
 #include "MarlinConfig.h"
 
-#define FIL_RUNOUT_THRESHOLD 20//5
-//extern uint16_t filament_out;
-#if ENABLED(LGT_MAC)
-#include "LGT_SCR.h"
-	extern LGT_SCR LGT_LCD;
-	extern bool LGT_is_printing;
-#endif
+#define FIL_RUNOUT_THRESHOLD 5
 
 class FilamentRunoutSensor {
   public:
@@ -51,16 +45,8 @@ class FilamentRunoutSensor {
     FORCE_INLINE static void reset() { runout_count = 0; filament_ran_out = false; }
 
     FORCE_INLINE static void run() {
-		if (
-#ifdef LGT_MAC
-	(LGT_is_printing == true)&&
-#endif
-	(IS_SD_PRINTING || print_job_timer.isRunning()) && check() && !filament_ran_out) {
+      if ((IS_SD_PRINTING() || print_job_timer.isRunning()) && check() && !filament_ran_out) {
         filament_ran_out = true;
-#ifdef LGT_MAC
-		//if(LGT_is_printing==true)
-		LGT_LCD.LGT_Change_Page(ID_DIALOG_NO_FILA);
-#endif
         enqueue_and_echo_commands_P(PSTR(FILAMENT_RUNOUT_SCRIPT));
         planner.synchronize();
       }

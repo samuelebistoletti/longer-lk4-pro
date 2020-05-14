@@ -51,67 +51,43 @@
 #ifndef BOARD_NAME
   #define BOARD_NAME "RAMPS 1.4"
 #endif
-#include "Configuration.h"
+
 //
 // Servos
 //
 #ifdef IS_RAMPS_13
-  #define SERVO0_PIN        7   // RAMPS_13 // Will conflict with BTN_EN2 on LCD_I2C_VIKI
+  #define SERVO0_PIN        7   // RAMPS_13
 #else
-	#ifndef LK1_Pro_AutoBed
-		#define SERVO0_PIN       11
-	#endif // !LK1_Pro_AutoBed
+  #define SERVO0_PIN       11
 #endif
-#ifndef LGT_MAC
-	#define SERVO1_PIN          6
-	#define SERVO2_PIN          5
-	#ifndef SERVO3_PIN
-	  #define SERVO3_PIN        4
-	#endif
+#ifndef SERVO1_PIN
+  #define SERVO1_PIN        6
+#endif
+#ifndef SERVO2_PIN
+  #define SERVO2_PIN        5
+#endif
+#ifndef SERVO3_PIN
+  #define SERVO3_PIN        4
 #endif
 
 //
 // Limit Switches
 //
 #define X_MIN_PIN           3
-#ifndef LGT_MAC
-	#ifndef X_MAX_PIN
-		#define X_MAX_PIN         2
-	#endif
-#endif // !LGT_MAC
+#ifndef X_MAX_PIN
+  #define X_MAX_PIN         2
+#endif
 #define Y_MIN_PIN          14
 #define Y_MAX_PIN          15
-
-#ifdef LGT_MAC
-	#define SD_DETECT_PIN   49
-	#ifndef FIL_RUNOUT_PIN
-		#define FIL_RUNOUT_PIN  2
-	#endif
-//#endif
-
-	#ifdef LK1_Pro_AutoBed
-		#define Z_MIN_PIN          11
-		#define Z_MAX_PIN          37
-	#else //LK4_Pro
-		#define Z_MIN_PIN          35
-		#define Z_MAX_PIN          37
-	#endif
-#else
-	#define Z_MIN_PIN          18
-	#define Z_MAX_PIN          19
-#endif
-
+#define Z_MIN_PIN          18
+#define Z_MAX_PIN          19
 
 //
 // Z Probe (when not Z_MIN_PIN)
 //
-#ifndef LGT_MAC
-	#ifndef Z_MIN_PROBE_PIN
-		#define Z_MIN_PROBE_PIN  32
-	#endif
-#endif // !LGT_MAC
-
-
+#ifndef Z_MIN_PROBE_PIN
+  #define Z_MIN_PROBE_PIN  32
+#endif
 
 //
 // Steppers
@@ -144,15 +120,12 @@
   #define E0_CS_PIN        42
 #endif
 
-#ifndef LGT_MAC
-	#define E1_STEP_PIN        36
-	#define E1_DIR_PIN         34
-	#define E1_ENABLE_PIN      30
-	#ifndef E1_CS_PIN
-		#define E1_CS_PIN        44
-	#endif
-#endif // !LGT_MAC
-
+#define E1_STEP_PIN        36
+#define E1_DIR_PIN         34
+#define E1_ENABLE_PIN      30
+#ifndef E1_CS_PIN
+  #define E1_CS_PIN        44
+#endif
 
 /**
  * Default pins for TMC software SPI
@@ -192,40 +165,82 @@
    * Software serial
    */
 
-  #define X_SERIAL_TX_PIN    40
-  #define X_SERIAL_RX_PIN    63
-  #define X2_SERIAL_TX_PIN   -1
-  #define X2_SERIAL_RX_PIN   -1
+  #ifndef X_SERIAL_TX_PIN
+    #define X_SERIAL_TX_PIN  40
+  #endif
+  #ifndef X_SERIAL_RX_PIN
+    #define X_SERIAL_RX_PIN  63
+  #endif
+  #ifndef X2_SERIAL_TX_PIN
+    #define X2_SERIAL_TX_PIN -1
+  #endif
+  #ifndef X2_SERIAL_RX_PIN
+    #define X2_SERIAL_RX_PIN -1
+  #endif
 
-  #define Y_SERIAL_TX_PIN    59
-  #define Y_SERIAL_RX_PIN    64
-  #define Y2_SERIAL_TX_PIN   -1
-  #define Y2_SERIAL_RX_PIN   -1
+  #ifndef Y_SERIAL_TX_PIN
+    #define Y_SERIAL_TX_PIN  59
+  #endif
+  #ifndef Y_SERIAL_RX_PIN
+    #define Y_SERIAL_RX_PIN  64
+  #endif
+  #ifndef Y2_SERIAL_TX_PIN
+    #define Y2_SERIAL_TX_PIN -1
+  #endif
+  #ifndef Y2_SERIAL_RX_PIN
+    #define Y2_SERIAL_RX_PIN -1
+  #endif
 
-  #define Z_SERIAL_TX_PIN    42
-  #define Z_SERIAL_RX_PIN    65
-  #define Z2_SERIAL_TX_PIN   -1
-  #define Z2_SERIAL_RX_PIN   -1
+  #ifndef Z_SERIAL_TX_PIN
+    #define Z_SERIAL_TX_PIN  42
+  #endif
+  #ifndef Z_SERIAL_RX_PIN
+    #define Z_SERIAL_RX_PIN  65
+  #endif
+  #ifndef Z2_SERIAL_TX_PIN
+    #define Z2_SERIAL_TX_PIN -1
+  #endif
+  #ifndef Z2_SERIAL_RX_PIN
+    #define Z2_SERIAL_RX_PIN -1
+  #endif
 
-  #define E0_SERIAL_TX_PIN   44
-  #define E0_SERIAL_RX_PIN   66
-  #define E1_SERIAL_TX_PIN   -1
-  #define E1_SERIAL_RX_PIN   -1
-  #define E2_SERIAL_TX_PIN   -1
-  #define E2_SERIAL_RX_PIN   -1
-  #define E3_SERIAL_TX_PIN   -1
-  #define E3_SERIAL_RX_PIN   -1
-  #define E4_SERIAL_TX_PIN   -1
-  #define E4_SERIAL_RX_PIN   -1
+  #ifndef E0_SERIAL_TX_PIN
+    #define E0_SERIAL_TX_PIN 44
+  #endif
+  #ifndef E0_SERIAL_RX_PIN
+    #define E0_SERIAL_RX_PIN 66
+  #endif
+  #ifndef E1_SERIAL_TX_PIN
+    #define E1_SERIAL_TX_PIN -1
+  #endif
+  #ifndef E1_SERIAL_RX_PIN
+    #define E1_SERIAL_RX_PIN -1
+  #endif
+  #ifndef E2_SERIAL_TX_PIN
+    #define E2_SERIAL_TX_PIN -1
+  #endif
+  #ifndef E2_SERIAL_RX_PIN
+    #define E2_SERIAL_RX_PIN -1
+  #endif
+  #ifndef E3_SERIAL_TX_PIN
+    #define E3_SERIAL_TX_PIN -1
+  #endif
+  #ifndef E3_SERIAL_RX_PIN
+    #define E3_SERIAL_RX_PIN -1
+  #endif
+  #ifndef E4_SERIAL_TX_PIN
+    #define E4_SERIAL_TX_PIN -1
+  #endif
+  #ifndef E4_SERIAL_RX_PIN
+    #define E4_SERIAL_RX_PIN -1
+  #endif
 #endif
 
 //
 // Temperature Sensors
 //
 #define TEMP_0_PIN         13   // Analog Input
-#ifndef LGT_MAC
-	#define TEMP_1_PIN         15   // Analog Input
-#endif // !LGT_MAC
+#define TEMP_1_PIN         15   // Analog Input
 #define TEMP_BED_PIN       14   // Analog Input
 
 // SPI for Max6675 or Max31855 Thermocouple
@@ -311,10 +326,8 @@
 #endif
 
 // define digital pin 4 for the filament runout sensor. Use the RAMPS 1.4 digital input 4 on the servos connector
-#ifndef LGT_MAC
-	#ifndef FIL_RUNOUT_PIN
-	  #define FIL_RUNOUT_PIN    4
-	#endif
+#ifndef FIL_RUNOUT_PIN
+  #define FIL_RUNOUT_PIN    4
 #endif
 
 #ifndef PS_ON_PIN
@@ -355,11 +368,9 @@
 #ifndef E_MUX1_PIN
   #define E_MUX1_PIN 42   // E0_CS_PIN
 #endif
-#ifndef LGT_MAC
-	#ifndef E_MUX2_PIN
-		#define E_MUX2_PIN 44   // E1_CS_PIN
-	#endif
-#endif // !LGT_MAC
+#ifndef E_MUX2_PIN
+  #define E_MUX2_PIN 44   // E1_CS_PIN
+#endif
 
 //////////////////////////
 // LCDs and Controllers //
@@ -485,8 +496,8 @@
 
     #elif ENABLED(LCD_I2C_VIKI)
 
-      #define BTN_EN1           22   // http://files.panucatt.com/datasheets/viki_wiring_diagram.pdf explains 40/42.
-      #define BTN_EN2            7   // 22/7 are unused on RAMPS_14. 22 is unused and 7 the SERVO0_PIN on RAMPS_13.
+      #define BTN_EN1           40   // http://files.panucatt.com/datasheets/viki_wiring_diagram.pdf explains 40/42.
+      #define BTN_EN2           42   // for sake of the wiring diagram for RAMPS 1.4 we keep 40/42, confirmed working.
       #define BTN_ENC           -1
 
       #define LCD_SDSS          SDSS
@@ -546,7 +557,7 @@
       #define BTN_ENC           35
 
       #define SD_DETECT_PIN     49
-      #define KILL_PIN          64
+      #define KILL_PIN          41
 
     #elif ENABLED(MINIPANEL)
 

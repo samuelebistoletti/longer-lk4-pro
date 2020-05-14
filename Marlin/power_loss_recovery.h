@@ -31,7 +31,7 @@
 #include "types.h"
 #include "MarlinConfig.h"
 
-//#define SAVE_INFO_INTERVAL_MS 0
+#define SAVE_INFO_INTERVAL_MS 0
 //#define SAVE_EACH_CMD_MODE
 //#define DEBUG_POWER_LOSS_RECOVERY
 
@@ -39,12 +39,11 @@ typedef struct {
   uint8_t valid_head;
 
   // Machine state
- // float current_position[NUM_AXIS], feedrate;
-  float save_current_Z, save_current_E, feedrate;
+  float current_position[NUM_AXIS], feedrate;
 
-  //#if HOTENDS > 1
-  //  uint8_t active_hotend;
-  //#endif
+  #if HOTENDS > 1
+    uint8_t active_hotend;
+  #endif
 
   int16_t target_temperature[HOTENDS];
 
@@ -56,10 +55,10 @@ typedef struct {
     int16_t fanSpeeds[FAN_COUNT];
   #endif
 
-  //#if HAS_LEVELING
-  //  bool leveling;
-  //  float fade;
-  //#endif
+  #if HAS_LEVELING
+    bool leveling;
+    float fade;
+  #endif
 
   // Command queue
   uint8_t cmd_queue_index_r, commands_in_queue;
@@ -71,8 +70,7 @@ typedef struct {
 
   // Job elapsed time
   millis_t print_job_elapsed;
-  //Job percentdone
-  uint8_t have_percentdone;
+
   uint8_t valid_foot;
 } job_recovery_info_t;
 
@@ -87,7 +85,7 @@ enum JobRecoveryPhase : unsigned char {
 extern JobRecoveryPhase job_recovery_phase;
 
 #if HAS_LEVELING
-  #define APPEND_CMD_COUNT 7//9
+  #define APPEND_CMD_COUNT 9
 #else
   #define APPEND_CMD_COUNT 7
 #endif

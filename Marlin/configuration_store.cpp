@@ -37,7 +37,7 @@
  */
 
 // Change EEPROM version if the structure changes
-#define EEPROM_VERSION "V55"
+#define EEPROM_VERSION "V56"
 #define EEPROM_OFFSET 100
 
 // Check the integrity of data offsets.
@@ -54,12 +54,6 @@
 #include "stepper.h"
 #include "parser.h"
 #include "vector_3.h"
-
-#ifdef LGT_MAC
-#include "LGT_SCR.h"
-//extern bool led_on;
-#endif // LGT_MAC
-
 
 #if ENABLED(MESH_BED_LEVELING)
   #include "mesh_bed_leveling.h"
@@ -81,6 +75,10 @@
 
 #if ENABLED(PID_EXTRUSION_SCALING)
   #define LPQ_LEN thermalManager.lpq_len
+#endif
+
+#if ENABLED(BLTOUCH)
+  extern bool bltouch_last_written_mode;
 #endif
 
 #pragma pack(push, 1) // No padding between variables
@@ -164,6 +162,11 @@ typedef struct SettingsDataStruct {
   //
   bool planner_leveling_active;                         // M420 S  planner.leveling_active
   int8_t ubl_storage_slot;                              // ubl.storage_slot
+
+  //
+  // BLTOUCH
+  //
+  bool bltouch_last_written_mode;
 
   //
   // DELTA / [XYZ]_DUAL_ENDSTOPS
@@ -314,7 +317,7 @@ void MarlinSettings::postprocess() {
   #endif
 
   #if ENABLED(PIDTEMP)
-    thermalManager.updatePID();
+    thermalManager.update_pid();
   #endif
 
   #if DISABLED(NO_VOLUMETRICS)
@@ -360,7 +363,6 @@ void MarlinSettings::postprocess() {
 
 #if ENABLED(EEPROM_SETTINGS)
 
-  #define DUMMY_PID_VALUE 3000.0f
   #define EEPROM_START() int eeprom_index = EEPROM_OFFSET
   #define EEPROM_SKIP(VAR) eeprom_index += sizeof(VAR)
   #define EEPROM_WRITE(VAR) write_data(eeprom_index, (uint8_t*)&VAR, sizeof(VAR), &working_crc)
@@ -579,6 +581,20 @@ void MarlinSettings::postprocess() {
       EEPROM_WRITE(storage_slot);
     #endif // AUTO_BED_LEVELING_UBL
 
+    //
+    // BLTOUCH
+    //
+    {
+      _FIELD_TEST(bltouch_last_written_mode);
+      #if ENABLED(BLTOUCH)
+        const bool &eeprom_bltouch_last_written_mode = bltouch_last_written_mode;
+      #else
+        constexpr bool eeprom_bltouch_last_written_mode = false;
+      #endif
+      EEPROM_WRITE(eeprom_bltouch_last_written_mode);
+    }
+
+
     // 11 floats for DELTA / [XYZ]_DUAL_ENDSTOPS
     #if ENABLED(DELTA)
 
@@ -646,11 +662,6 @@ void MarlinSettings::postprocess() {
     EEPROM_WRITE(lcd_preheat_bed_temp);
     EEPROM_WRITE(lcd_preheat_fan_speed);
 
-//#ifdef LGT_MAC
-//	eeprom_write_dword((uint32_t*)EEPROM_INDEX, 0);
-//#endif // LGT_MAC
-
-
     for (uint8_t e = 0; e < MAX_EXTRUDERS; e++) {
 
       #if ENABLED(PIDTEMP)
@@ -668,7 +679,7 @@ void MarlinSettings::postprocess() {
         else
       #endif // !PIDTEMP
         {
-          dummy = DUMMY_PID_VALUE; // When read, will not change the existing value
+          dummy = NAN; // When read, will not change the existing value
           EEPROM_WRITE(dummy); // Kp
           dummy = 0;
           for (uint8_t q = 3; q--;) EEPROM_WRITE(dummy); // Ki, Kd, Kc
@@ -684,7 +695,7 @@ void MarlinSettings::postprocess() {
     EEPROM_WRITE(LPQ_LEN);
 
     #if DISABLED(PIDTEMPBED)
-      dummy = DUMMY_PID_VALUE;
+      dummy = NAN;
       for (uint8_t q = 3; q--;) EEPROM_WRITE(dummy);
     #else
       EEPROM_WRITE(thermalManager.bedKp);
@@ -989,6 +1000,7 @@ void MarlinSettings::postprocess() {
 
       EEPROM_WRITE(version);
       EEPROM_WRITE(final_crc);
+
       // Report storage size
       #if ENABLED(EEPROM_CHITCHAT)
         SERIAL_ECHO_START();
@@ -1202,6 +1214,19 @@ void MarlinSettings::postprocess() {
       #endif // AUTO_BED_LEVELING_UBL
 
       //
+      // BLTOUCH
+      //
+      {
+        _FIELD_TEST(bltouch_last_written_mode);
+        #if ENABLED(BLTOUCH)
+          bool &eeprom_bltouch_last_written_mode = bltouch_last_written_mode;
+        #else
+          bool eeprom_bltouch_last_written_mode;
+        #endif
+        EEPROM_READ(eeprom_bltouch_last_written_mode);
+      }
+
+      //
       // DELTA Geometry or Dual Endstops offsets
       //
 
@@ -1265,12 +1290,6 @@ void MarlinSettings::postprocess() {
       EEPROM_READ(lcd_preheat_bed_temp);    // 2 floats
       EEPROM_READ(lcd_preheat_fan_speed);   // 2 floats
 
-//#ifdef LGT_MAC
-//	  eeprom_read_dword((const uint32_t*)EEPROM_INDEX);
-//#endif // LGT_MAC
-
-
-
       //EEPROM_ASSERT(
       //  WITHIN(lcd_preheat_fan_speed, 0, 255),
       //  "lcd_preheat_fan_speed out of range"
@@ -1283,7 +1302,7 @@ void MarlinSettings::postprocess() {
       #if ENABLED(PIDTEMP)
         for (uint8_t e = 0; e < MAX_EXTRUDERS; e++) {
           EEPROM_READ(dummy); // Kp
-          if (e < HOTENDS && dummy != DUMMY_PID_VALUE) {
+          if (e < HOTENDS && !isnan(dummy)) {
             // do not need to scale PID values as the values in EEPROM are already scaled
             if (!validating) PID_PARAM(Kp, e) = dummy;
             EEPROM_READ(PID_PARAM(Ki, e));
@@ -1320,7 +1339,7 @@ void MarlinSettings::postprocess() {
 
       #if ENABLED(PIDTEMPBED)
         EEPROM_READ(dummy); // bedKp
-        if (dummy != DUMMY_PID_VALUE) {
+        if (!isnan(dummy)) {
           if (!validating) thermalManager.bedKp = dummy;
           EEPROM_READ(thermalManager.bedKi);
           EEPROM_READ(thermalManager.bedKd);
@@ -1916,9 +1935,6 @@ void MarlinSettings::reset() {
     lcd_preheat_fan_speed[0] = PREHEAT_1_FAN_SPEED;
     lcd_preheat_fan_speed[1] = PREHEAT_2_FAN_SPEED;
   #endif
-//#ifdef LGT_MAC
-//	//led_on = true;
-//#endif // LGT_MAC
 
   #if ENABLED(PIDTEMP)
     #if ENABLED(PID_PARAMS_PER_HOTEND) && HOTENDS > 1

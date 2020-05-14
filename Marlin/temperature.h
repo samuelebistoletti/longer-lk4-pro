@@ -43,12 +43,6 @@
   #define SOFT_PWM_SCALE 0
 #endif
 
-#ifdef LGT_MAC
-#include"LGT_SCR.h"
-	extern bool tartemp_flag;
-#endif // LGT_MAC
-
-
 #define ENABLE_TEMPERATURE_INTERRUPT()  SBI(TIMSK0, OCIE0B)
 #define DISABLE_TEMPERATURE_INTERRUPT() CBI(TIMSK0, OCIE0B)
 #define TEMPERATURE_ISR_ENABLED()      TEST(TIMSK0, OCIE0B)
@@ -324,13 +318,13 @@ class Temperature {
     /**
      * Static (class) methods
      */
-    static float analog2temp(const int raw, const uint8_t e);
+    static float analog_to_celsius_hotend(const int raw, const uint8_t e);
 
     #if HAS_HEATED_BED
-      static float analog2tempBed(const int raw);
+      static float analog_to_celsius_bed(const int raw);
     #endif
     #if HAS_TEMP_CHAMBER
-      static float analog2tempChamber(const int raw);
+      static float analog_to_celsius_chamber(const int raw);
     #endif
 
     /**
@@ -371,7 +365,7 @@ class Temperature {
     #endif
 
     #if ENABLED(FILAMENT_WIDTH_SENSOR)
-      static float analog2widthFil();         // Convert raw Filament Width to millimeters
+      static float analog_to_mm_fil_width();         // Convert raw Filament Width to millimeters
       static int8_t widthFil_to_size_ratio(); // Convert Filament Width (mm) to an extrusion ratio
     #endif
 
@@ -408,10 +402,6 @@ class Temperature {
     #endif
 
     static void setTargetHotend(const int16_t celsius, const uint8_t e) {
-	#ifdef LGT_MAC
-		tartemp_flag = true;
-	#endif // LGT_MAC
-
       #if HOTENDS == 1
         UNUSED(e);
       #endif
@@ -424,7 +414,7 @@ class Temperature {
       #if ENABLED(AUTO_POWER_CONTROL)
         powerManager.power_on();
       #endif
-      target_temperature[HOTEND_INDEX] = celsius;
+      target_temperature[HOTEND_INDEX] = MIN(celsius, maxttemp[HOTEND_INDEX] - 15);
       #if WATCH_HOTENDS
         start_watching_heater(HOTEND_INDEX);
       #endif
@@ -454,15 +444,12 @@ class Temperature {
       FORCE_INLINE static bool isCoolingBed()     { return target_temperature_bed < current_temperature_bed; }
 
       static void setTargetBed(const int16_t celsius) {
-		#ifdef LGT_MAC
-			tartemp_flag = true;
-		#endif // LGT_MAC
         #if ENABLED(AUTO_POWER_CONTROL)
           powerManager.power_on();
         #endif
         target_temperature_bed =
           #ifdef BED_MAXTEMP
-            MIN(celsius, BED_MAXTEMP)
+            MIN(celsius, BED_MAXTEMP - 15)
           #else
             celsius
           #endif
@@ -502,13 +489,13 @@ class Temperature {
      * Perform auto-tuning for hotend or bed in response to M303
      */
     #if HAS_PID_HEATING
-      static void PID_autotune(const float &target, const int8_t hotend, const int8_t ncycles, const bool set_result=false);
+      static void pid_autotune(const float &target, const int8_t hotend, const int8_t ncycles, const bool set_result=false);
 
       /**
        * Update the temp manager when PID values change
        */
       #if ENABLED(PIDTEMP)
-        FORCE_INLINE static void updatePID() {
+        FORCE_INLINE static void update_pid() {
           #if ENABLED(PID_EXTRUSION_SCALING)
             last_e_position = 0;
           #endif
@@ -625,13 +612,13 @@ class Temperature {
 
     static void set_current_temp_raw();
 
-    static void updateTemperaturesFromRawValues();
+    static void calculate_celsius_temperatures();
 
     #if ENABLED(HEATER_0_USES_MAX6675)
       static int read_max6675();
     #endif
 
-    static void checkExtruderAutoFans();
+    static void check_extruder_auto_fans();
 
     static float get_pid_output(const int8_t e);
 
