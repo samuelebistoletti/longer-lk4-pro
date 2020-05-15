@@ -605,7 +605,7 @@
  * Override with M92
  *                                      X, Y, Z, E0 [, E1[, E2[, E3[, E4]]]]
  */
-#define DEFAULT_AXIS_STEPS_PER_UNIT   { 80, 80, 400, 92.599 }
+#define DEFAULT_AXIS_STEPS_PER_UNIT   { 80, 80, 400, 94.97 }
 
 /**
  * Default Max Feed Rate (mm/s)
@@ -955,7 +955,7 @@
   #define NUM_RUNOUT_SENSORS   1     // Number of sensors, up to one per extruder. Define a FIL_RUNOUT#_PIN for each.
   #define FIL_RUNOUT_INVERTING true // set to true to invert the logic of the sensor.
   #define FIL_RUNOUT_PULLUP          // Use internal pullup for filament runout pins.
-  #define FILAMENT_RUNOUT_SCRIPT  "M25"/*"M600 E2 Z0 X10 Y250 F600"*///"M25"//"M600"
+  #define FILAMENT_RUNOUT_SCRIPT "M25"
 #endif
 
 //===========================================================================
@@ -998,9 +998,6 @@
  */
 //#define AUTO_BED_LEVELING_3POINT
 //#define AUTO_BED_LEVELING_LINEAR
-#if ENABLED (LK1_Pro_AutoBed)
-	#define AUTO_BED_LEVELING_BILINEAR
-#endif
 //#define AUTO_BED_LEVELING_BILINEAR
 //#define AUTO_BED_LEVELING_UBL
 #define MESH_BED_LEVELING
@@ -1314,9 +1311,9 @@
  *    P2  Raise the nozzle by Z-park amount, limited to Z_MAX_POS.
  */
 #ifdef LGT_MAC
-//	#define NOZZLE_PARK_FEATURE
+  //#define NOZZLE_PARK_FEATURE
 #else
- //#define NOZZLE_PARK_FEATURE
+  //#define NOZZLE_PARK_FEATURE
 #endif // LGT_MAC
 
 #if ENABLED(NOZZLE_PARK_FEATURE)

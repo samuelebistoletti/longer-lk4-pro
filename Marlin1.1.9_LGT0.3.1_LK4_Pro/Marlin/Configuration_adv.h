@@ -991,7 +991,7 @@
  * This feature is required for the default FILAMENT_RUNOUT_SCRIPT.
  */
 #ifdef LGT_MAC
-// #define ADVANCED_PAUSE_FEATURE
+  //#define ADVANCED_PAUSE_FEATURE
 #else
  //#define ADVANCED_PAUSE_FEATURE
 #endif // LGT_MAC
@@ -1030,7 +1030,6 @@
   #define FILAMENT_CHANGE_ALERT_BEEPS         10  // Number of alert beeps to play when a response is needed.
   #define PAUSE_PARK_NO_STEPPER_TIMEOUT           // Enable for XYZ steppers to stay powered on during filament change.
 
-  //#define PARK_HEAD_ON_PAUSE  
 #ifdef LGT_MAC
 	#define PARK_HEAD_ON_PAUSE  
 #endif
@@ -1539,8 +1538,8 @@
  * Will be sent in the form '//action:ACTION_ON_PAUSE', e.g. '//action:pause'.
  * The host must be configured to handle the action command.
  */
-//#define ACTION_ON_PAUSE "pause"
-//#define ACTION_ON_RESUME "resume"
+#define ACTION_ON_PAUSE "pause"
+#define ACTION_ON_RESUME "resume"
 
 //===========================================================================
 //====================== I2C Position Encoder Settings ======================
